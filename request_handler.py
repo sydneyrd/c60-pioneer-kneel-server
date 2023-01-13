@@ -1,4 +1,5 @@
 import json
+import copy
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 DATABASE = {
@@ -9,22 +10,16 @@ DATABASE = {
         {"id": 4, "metal": "Platinum", "price": 795.45},
         {"id": 5, "metal": "Palladium", "price": 1241.0}
     ],
-    "STYLES ": [
+    "STYLES": [
         {"id": 1, "style": "Classic", "price": 500},
         {"id": 2, "style": "Modern", "price": 710},
         {"id": 3, "style": "Vintage", "price": 965}
     ],
     "TYPES": [
-        {"id": 1,
-        "name": "Earring"},
-        {
-            "id": 2,
-            "name": "Ring"
-        },
-        {
-            "id": 3,
-            "name": "Necklace"
-        }],
+        {"id": 1,"name": "Earring"},
+        {"id": 2,"name": "Ring"},
+        {"id": 3,"name": "Necklace"}
+        ],
     "SIZES": [
         {"id": 1, "carets": 0.5, "price": 405},
         {"id": 2, "carets": 0.75, "price": 782},
@@ -38,16 +33,9 @@ DATABASE = {
             "metalId": 3,
             "sizeId": 2,
             "styleId": 3,
-            "timestamp": 1614659931693,
-            "jewelryTypeId": 3,
-            "totalCost": 2
+            "timestamp": "2018-01-01 12:01:01",
+            "jewelryTypeId": 3
         }]}
-
-
-def all(resource):
-    """For GET requests to collection"""
-    return DATABASE[resource.upper()]
-
 
 def single(resource, id):
     """For GET requests to single resource"""
@@ -55,17 +43,29 @@ def single(resource, id):
     for element in DATABASE[resource.upper()]:
         if element["id"] == id:
             response = element
-        return response
+    return response
 
+def all(resource):
+    """For GET requests to collection"""
+    if resource == 'orders':
+        data = DATABASE[resource.upper()][:]
+        new_data = copy.deepcopy(data)
+        for order in new_data:
+            order["metal"] = single("METALS", order["metalId"])
+            order["size"] = single("SIZES", order["sizeId"])
+            order["style"] = single("STYLES", order["styleId"])
+            order["type"] = single("TYPES", order["jewelryTypeId"])
+            del order["metalId"], order["sizeId"], order["styleId"], order["jewelryTypeId"]
+        return new_data
+    else:
+        return DATABASE[resource.upper()]
 
 def create(resource, new_item):
     max_id = DATABASE[resource.upper()][-1]["id"]
     new_id = max_id + 1
     new_item["id"] = new_id
     DATABASE[resource.upper()].append(new_item)
-    pass
     return new_item
-
 
 def delete(resource, id):
     """For DELETE requests"""
@@ -77,53 +77,12 @@ def delete(resource, id):
         DATABASE[resource.upper()].pop(element_index)
     pass
 
-
 def update(resource, id, new_item):
     """For PUT requests"""
     for index, element in enumerate(DATABASE[resource.upper()]):
         if element["id"] == id:
             DATABASE[resource.upper()][index] = new_item
             break
-
-
-method_mapper = {
-    "metals": {
-        "all": all,
-        "single": single,
-        "create": create,
-        "update": update,
-        "delete": delete
-    },
-    "sizes": {
-        "all": all,
-        "single": single,
-        "create": create,
-        "update": update,
-        "delete": delete
-    },
-    "styles": {
-        "all": all,
-        "single": single,
-        "create": create,
-        "update": update,
-        "delete": delete
-    },
-    "orders": {
-        "all": all,
-        "single": single,
-        "create": create,
-        "update": update,
-        "delete": delete
-    },
-    "types": {
-        "all": all,
-        "single": single,
-        "create": create,
-        "update": update,
-        "delete": delete
-    }
-}
-
 
 class HandleRequests(BaseHTTPRequestHandler):
     """Controls the functionality of any GET, PUT, POST, DELETE requests to the server
@@ -143,7 +102,7 @@ class HandleRequests(BaseHTTPRequestHandler):
 
     def get_all_or_single(self, resource, id):
         if id is not None:
-            response = method_mapper[resource]["single"](resource, id)
+            response = single(resource, id)
             if response is not None:
                 self._set_headers(200)
             else:
@@ -151,7 +110,7 @@ class HandleRequests(BaseHTTPRequestHandler):
                 response = {"error": "Not Found"}
         else:
             self._set_headers(200)
-            response = method_mapper[resource]["all"](resource)
+            response = all(resource)
         return response
 
     def do_GET(self):
@@ -175,7 +134,6 @@ class HandleRequests(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        self._set_headers(201)
         content_len = int(self.headers.get('content-length', 0))
         post_body = self.rfile.read(content_len)
         post_body = json.loads(post_body)
@@ -184,32 +142,36 @@ class HandleRequests(BaseHTTPRequestHandler):
         if resource == "orders":
             if "metalId" in post_body and "jewelryTypeId" in post_body and "sizeId" in post_body and "styleId" in post_body:
                 self._set_headers(201)
-                new_post = method_mapper[resource]["create"](
-                    resource, post_body)
+                new_post = create(resource, post_body)
             else:
                 self._set_headers(400)
                 new_post = {
-                    "message": f'{"metalId is required" if "metalId" not in post_body else ""} {"jewelryTypeId is required" if "jewelryTypeId" not in post_body else ""} {"sizeId is required" if "sizeId" not in post_body else ""} {"styleId is required" if "styleId" not in post_body else ""}'
+                    "message": f'{"metal is required" if "metal" not in post_body else ""} {"jewelryType is required" if "jewelryType" not in post_body else ""} {"size is required" if "size" not in post_body else ""} {"style is required" if "style" not in post_body else ""}'
                 }
+        if resource != "orders":
+            self._set_headers(405)
+            new_post = {"error": "not allowed"}
         self.wfile.write(json.dumps(new_post).encode())
 
     def do_DELETE(self):
         self._set_headers(204)
         (resource, id) = self.parse_url(self.path)
         if resource == "orders":
-            delete_order(id)
-        self.wfile.write("".encode())
+            response = {"message": "success"}
+        self.wfile.write(json.dumps(response).encode())
 
     def do_PUT(self):
         content_len = int(self.headers.get('content-length', 0))
         post_body = self.rfile.read(content_len)
         post_body = json.loads(post_body)
         (resource, id) = self.parse_url(self.path)
-        if resource == "orders":
-            self._set_headers(405)
-            response = {"message": "You can't change a pending order"}
+        if resource == 'metals':
+            self._set_headers(201)
+            response = {"message": "success"}
+        else:
+            self._set_headers(400)
+            response = {"error": "not allowed"}
         self.wfile.write(json.dumps(response).encode())
-
 
 def main():
     """Starts the server on port 8088 using the HandleRequests class
